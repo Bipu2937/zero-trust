@@ -1,0 +1,23 @@
+buildscript {
+    ext {
+        buildToolsVersion = "34.0.0"
+        // minSdk 26: required for adaptive icons; StrongBox needs 28+, we
+        // gracefully fall back to TEE-backed Keystore on older hardware.
+        minSdkVersion = 26
+        compileSdkVersion = 34
+        targetSdkVersion = 34
+        ndkVersion = "25.1.8937393"
+        kotlinVersion = "1.8.22"
+    }
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        classpath("com.android.tools.build:gradle")
+        classpath("com.facebook.react:react-native-gradle-plugin")
+        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin")
+    }
+}
+
+apply plugin: "com.facebook.react.rootproject"

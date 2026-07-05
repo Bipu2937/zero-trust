@@ -1,0 +1,28 @@
+# Node
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Android / Gradle
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/.cxx/
+*.hprof
+
+# Release signing (never commit real release keys)
+android/app/release.keystore
+*.jks
+
+# Metro / RN
+.metro-health-check*
+*.bundle
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# macOS
+.DS_Store

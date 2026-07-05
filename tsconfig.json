@@ -1,0 +1,10 @@
+{
+  "extends": "@react-native/typescript-config/tsconfig.json",
+  "compilerOptions": {
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "types": ["react-native"]
+  },
+  "include": ["src", "index.js"],
+  "exclude": ["node_modules", "android"]
+}

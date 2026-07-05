@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ZERO-TRUST MANIFEST — deliberate omissions are the security feature:
+
+  * NO <uses-permission android:name="android.permission.INTERNET"/>
+    The app is physically incapable of network I/O. Any malicious
+    transitive npm/Gradle dependency that tries to exfiltrate data gets
+    SecurityException at the socket layer. (Debug builds add INTERNET via
+    src/debug/AndroidManifest.xml only so Metro can serve the JS bundle.)
+
+  * NO storage permissions. Import/export go through the Storage Access
+    Framework / CREATE_DOCUMENT, which are permission-less by design.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application
+        android:name=".MainApplication"
+        android:label="@string/app_name"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:allowBackup="false"
+        android:fullBackupContent="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:hardwareAccelerated="true"
+        android:supportsRtl="true"
+        android:theme="@style/AppTheme">
+
+        <!--
+          excludeFromRecents: zero footprint in the Recents switcher.
+          FLAG_SECURE (set in MainActivity) already blanks the recents
+          thumbnail; excluding entirely means the app never appears there.
+        -->
+        <activity
+            android:name=".MainActivity"
+            android:label="@string/app_name"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTask"
+            android:configChanges="keyboard|keyboardHidden|orientation|screenLayout|screenSize|smallestScreenSize|uiMode"
+            android:windowSoftInputMode="adjustResize"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

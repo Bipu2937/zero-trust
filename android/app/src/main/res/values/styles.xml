@@ -1,0 +1,8 @@
+<resources>
+    <!-- Dark, action-bar-less base theme. -->
+    <style name="AppTheme" parent="Theme.AppCompat.NoActionBar">
+        <item name="android:windowBackground">@color/vault_background</item>
+        <item name="android:statusBarColor">@color/vault_background</item>
+        <item name="android:navigationBarColor">@color/vault_background</item>
+    </style>
+</resources>
