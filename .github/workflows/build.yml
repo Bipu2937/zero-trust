@@ -1,0 +1,49 @@
+name: Build APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Install JS dependencies
+        run: npm ci
+
+      - name: Build release APK (air-gapped, no INTERNET permission)
+        run: cd android && ./gradlew assembleRelease --no-daemon
+
+      - name: Upload APK as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ZeroTrustVault-apk
+          path: android/app/build/outputs/apk/release/app-release.apk
+
+      - name: Publish APK to the "latest" release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Latest APK build
+          prerelease: true
+          files: android/app/build/outputs/apk/release/app-release.apk
+          body: |
+            Auto-built release APK (signed with the repo debug key, for personal sideloading).
+            Download app-release.apk below and install it on your Android device.
