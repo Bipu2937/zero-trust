@@ -163,10 +163,14 @@ class VaultModule(private val reactContext: ReactApplicationContext) :
     /**
      * Reverse flow: user picks a destination via CREATE_DOCUMENT (Downloads,
      * SD card, anywhere) and the item is decrypted chunk-by-chunk into it.
-     * Requires an unlocked vault — export is an explicit, authorized act.
+     *
+     * Name/mime arrive from JS (which already holds the metadata) so that
+     * NO key usage happens before the picker opens — the picker backgrounds
+     * the app and instant-locks the vault, so like import, the actual
+     * decryption is queued and runs right after the next unlock.
      */
     @ReactMethod
-    fun exportItem(itemId: String, promise: Promise) {
+    fun exportItem(itemId: String, name: String, mime: String, promise: Promise) {
         val activity = currentActivity
         if (activity == null) {
             promise.reject("E_ACTIVITY", "No activity")
@@ -176,21 +180,18 @@ class VaultModule(private val reactContext: ReactApplicationContext) :
             promise.reject("E_BUSY", "Export already in progress")
             return
         }
-        val item = try {
-            VaultStore.findItem(reactContext, SessionManager.requireKey(), itemId)
+        try {
+            // Validates the id format up front (path-traversal guard).
+            VaultStore.mediaFile(reactContext, itemId)
         } catch (t: Throwable) {
-            promise.reject("E_LOCKED", t)
-            return
-        }
-        if (item == null) {
-            promise.reject("E_NOT_FOUND", "Unknown item")
+            promise.reject("E_NOT_FOUND", t)
             return
         }
         pendingExport = PendingExport(promise, itemId)
         val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
-            type = item.mime
-            putExtra(Intent.EXTRA_TITLE, item.name)
+            type = mime.ifBlank { "application/octet-stream" }
+            putExtra(Intent.EXTRA_TITLE, name.ifBlank { "vault-export" })
         }
         activity.startActivityForResult(intent, REQUEST_EXPORT)
     }
@@ -303,9 +304,18 @@ class VaultModule(private val reactContext: ReactApplicationContext) :
         }
         pending.promise.resolve(importResult(imported, failed))
         emit("vaultChanged", Arguments.createMap())
+        emit(
+            "vaultActivity",
+            Arguments.createMap().apply {
+                putString("type", "import")
+                putInt("imported", imported)
+                putInt("failed", failed)
+            },
+        )
     }
 
     private fun runExport(pending: PendingExport) {
+        var success = false
         try {
             val key = SessionManager.requireKey()
             val file = VaultStore.mediaFile(reactContext, pending.itemId)
@@ -314,10 +324,20 @@ class VaultModule(private val reactContext: ReactApplicationContext) :
                     VaultCipher.decryptStream(key, raf, out)
                 }
             } ?: throw java.io.IOException("Cannot open destination")
+            success = true
             pending.promise.resolve(true)
         } catch (t: Throwable) {
             pending.promise.reject("E_EXPORT", t)
         }
+        // The requesting screen was unmounted by the instant lock; this
+        // event lets whatever is mounted now show the outcome.
+        emit(
+            "vaultActivity",
+            Arguments.createMap().apply {
+                putString("type", "export")
+                putBoolean("success", success)
+            },
+        )
     }
 
     /* ------------------------------ helpers ----------------------------- */

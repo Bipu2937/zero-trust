@@ -1,6 +1,5 @@
 import React, {useRef, useState} from 'react';
 import {
-  Alert,
   FlatList,
   Pressable,
   StyleSheet,
@@ -8,6 +7,7 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
+import {ConfirmSheet} from '../components/ConfirmSheet';
 import {SeekBar} from '../components/SeekBar';
 import {
   MediaEvent,
@@ -35,50 +35,41 @@ function formatTime(ms: number): string {
  * items. Security invariant: only the CURRENTLY VISIBLE page mounts a
  * SecureMediaView, so exactly one decrypted surface exists at any time —
  * swiping away tears the old one down and wipes its buffers.
+ *
+ * All confirmations use the in-app ConfirmSheet (never Alert/Modal):
+ * dialog windows steal focus and would trip the instant lock.
  */
 export function ViewerScreen({items, initialIndex, onClose}: Props): React.JSX.Element {
   const {width} = useWindowDimensions();
   const [index, setIndex] = useState(
     Math.min(Math.max(initialIndex, 0), Math.max(items.length - 1, 0)),
   );
+  const [sheet, setSheet] = useState<'export' | 'delete' | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const current = items[index];
 
-  const onExport = () => {
+  const confirmExport = () => {
+    setSheet(null);
     if (!current) {
       return;
     }
-    Alert.alert(
-      'Export from vault',
-      `Decrypt "${current.name}" and write it to a location you choose?`,
-      [
-        {text: 'Cancel', style: 'cancel'},
-        {
-          text: 'Export',
-          onPress: () => {
-            Vault.exportItem(current.id).catch(() => Alert.alert('Export failed'));
-          },
-        },
-      ],
+    // The document picker backgrounds the app → instant lock. The export
+    // is queued natively and runs right after the next unlock; the result
+    // is announced via the vaultActivity event (GalleryScreen shows it).
+    Vault.exportItem(current.id, current.name, current.mime).catch(() =>
+      setNotice('Could not start export'),
     );
   };
 
-  const onDelete = () => {
+  const confirmDelete = () => {
+    setSheet(null);
     if (!current) {
       return;
     }
-    Alert.alert('Delete from vault', 'This shreds the encrypted file.', [
-      {text: 'Cancel', style: 'cancel'},
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: () => {
-          Vault.deleteItem(current.id)
-            .then(onClose)
-            .catch(() => Alert.alert('Delete failed'));
-        },
-      },
-    ]);
+    Vault.deleteItem(current.id)
+      .then(onClose)
+      .catch(() => setNotice('Delete failed'));
   };
 
   return (
@@ -100,6 +91,8 @@ export function ViewerScreen({items, initialIndex, onClose}: Props): React.JSX.E
         )}
       />
 
+      {notice && <Text style={styles.notice}>{notice}</Text>}
+
       <View style={styles.bar}>
         <Pressable style={styles.barButton} onPress={onClose}>
           <Text style={styles.barButtonText}>‹ Back</Text>
@@ -107,13 +100,30 @@ export function ViewerScreen({items, initialIndex, onClose}: Props): React.JSX.E
         <Text style={styles.name} numberOfLines={1}>
           {current ? `${current.name}  ·  ${index + 1}/${items.length}` : ''}
         </Text>
-        <Pressable style={styles.barButton} onPress={onExport}>
+        <Pressable style={styles.barButton} onPress={() => setSheet('export')}>
           <Text style={styles.barButtonText}>Export</Text>
         </Pressable>
-        <Pressable style={styles.barButton} onPress={onDelete}>
+        <Pressable style={styles.barButton} onPress={() => setSheet('delete')}>
           <Text style={[styles.barButtonText, styles.danger]}>Delete</Text>
         </Pressable>
       </View>
+
+      {sheet === 'export' && current && (
+        <ConfirmSheet
+          title="Export from vault"
+          message={`Decrypt "${current.name}" and write it to a location you choose. The vault will lock while the file picker is open; the export finishes right after you unlock again.`}
+          actions={[{label: 'Choose destination', onPress: confirmExport}]}
+          onCancel={() => setSheet(null)}
+        />
+      )}
+      {sheet === 'delete' && current && (
+        <ConfirmSheet
+          title="Delete from vault"
+          message={`This shreds the encrypted file for "${current.name}". It cannot be recovered.`}
+          actions={[{label: 'Delete', danger: true, onPress: confirmDelete}]}
+          onCancel={() => setSheet(null)}
+        />
+      )}
     </View>
   );
 }
@@ -195,7 +205,7 @@ function MediaPage({
         style={styles.media}
       />
 
-      {error && <Text style={styles.status}>{error}</Text>}
+      {error && <Text style={styles.notice}>{error}</Text>}
 
       {item.kind === 'video' && (
         <View style={styles.controls}>
@@ -231,7 +241,7 @@ const styles = StyleSheet.create({
   media: {
     flex: 1,
   },
-  status: {
+  notice: {
     color: colors.danger,
     textAlign: 'center',
     padding: spacing.sm,

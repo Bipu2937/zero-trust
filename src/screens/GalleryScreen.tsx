@@ -1,13 +1,8 @@
-import React, {useCallback, useEffect, useState} from 'react';
+import React, {useCallback, useEffect, useRef, useState} from 'react';
+import {FlatList, Pressable, StyleSheet, Text, View} from 'react-native';
+import {ConfirmSheet} from '../components/ConfirmSheet';
 import {
-  Alert,
-  FlatList,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
-import {
+  onVaultActivity,
   onVaultChanged,
   Vault,
   VaultItemMeta,
@@ -35,10 +30,17 @@ function formatSize(bytes: number): string {
  * type glyphs. Pixel data appears exclusively inside the secure viewer
  * surface; there are no JS-side thumbnails because thumbnails would mean
  * plaintext bytes in the JS heap.
+ *
+ * Also the landing screen after every unlock, so it owns the banner that
+ * reports queued import/export outcomes (those finish after re-unlock,
+ * long after the screen that started them is gone).
  */
 export function GalleryScreen({state, onOpen}: Props): React.JSX.Element {
   const [items, setItems] = useState<VaultItemMeta[]>([]);
   const [busy, setBusy] = useState(false);
+  const [importSheet, setImportSheet] = useState(false);
+  const [banner, setBanner] = useState<string | null>(null);
+  const bannerTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const refresh = useCallback(() => {
     Vault.listItems()
@@ -46,34 +48,47 @@ export function GalleryScreen({state, onOpen}: Props): React.JSX.Element {
       .catch(() => setItems([]));
   }, []);
 
+  const showBanner = useCallback((text: string) => {
+    setBanner(text);
+    if (bannerTimer.current) {
+      clearTimeout(bannerTimer.current);
+    }
+    bannerTimer.current = setTimeout(() => setBanner(null), 5000);
+  }, []);
+
   useEffect(() => {
     refresh();
-    return onVaultChanged(refresh);
-  }, [refresh]);
+    const unsubChanged = onVaultChanged(refresh);
+    const unsubActivity = onVaultActivity(event => {
+      if (event.type === 'export') {
+        showBanner(event.success ? 'Export complete ✓' : 'Export failed');
+      } else if (event.type === 'import') {
+        const failed = event.failed ?? 0;
+        showBanner(
+          `Imported ${event.imported ?? 0} item(s)` +
+            (failed > 0 ? `, ${failed} failed` : ' ✓'),
+        );
+      }
+    });
+    return () => {
+      unsubChanged();
+      unsubActivity();
+      if (bannerTimer.current) {
+        clearTimeout(bannerTimer.current);
+      }
+    };
+  }, [refresh, showBanner]);
 
   const importMedia = (deleteOriginals: boolean) => {
+    setImportSheet(false);
     setBusy(true);
+    // The picker backgrounds the app → instant lock. The import is queued
+    // natively and runs after the next unlock; outcome arrives via the
+    // vaultActivity banner.
     Vault.importMedia(deleteOriginals)
-      .then(result => {
-        if (result.failed > 0) {
-          Alert.alert('Import', `${result.imported} added, ${result.failed} failed.`);
-        }
-        refresh();
-      })
+      .then(refresh)
       .catch(() => undefined)
       .finally(() => setBusy(false));
-  };
-
-  const onImport = () => {
-    Alert.alert('Move to Vault', 'Delete originals after encrypting?', [
-      {text: 'Cancel', style: 'cancel'},
-      {text: 'Keep originals', onPress: () => importMedia(false)},
-      {
-        text: 'Move (delete originals)',
-        style: 'destructive',
-        onPress: () => importMedia(true),
-      },
-    ]);
   };
 
   return (
@@ -93,6 +108,8 @@ export function GalleryScreen({state, onOpen}: Props): React.JSX.Element {
           <Text style={styles.lockButtonText}>LOCK</Text>
         </Pressable>
       </View>
+
+      {banner && <Text style={styles.banner}>{banner}</Text>}
 
       <FlatList
         data={items}
@@ -125,11 +142,27 @@ export function GalleryScreen({state, onOpen}: Props): React.JSX.Element {
       <Pressable
         style={[styles.importButton, busy && styles.importButtonBusy]}
         disabled={busy}
-        onPress={onImport}>
+        onPress={() => setImportSheet(true)}>
         <Text style={styles.importButtonText}>
           {busy ? 'Working…' : '+ Import media'}
         </Text>
       </Pressable>
+
+      {importSheet && (
+        <ConfirmSheet
+          title="Move to Vault"
+          message="Pick photos or videos to encrypt into the vault. The vault locks while the picker is open; the import finishes right after you unlock again. Delete the originals afterwards?"
+          actions={[
+            {label: 'Keep originals', onPress: () => importMedia(false)},
+            {
+              label: 'Move (delete originals)',
+              danger: true,
+              onPress: () => importMedia(true),
+            },
+          ]}
+          onCancel={() => setImportSheet(false)}
+        />
+      )}
     </View>
   );
 }
@@ -169,6 +202,17 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     fontSize: 12,
     letterSpacing: 1,
+  },
+  banner: {
+    color: colors.background,
+    backgroundColor: colors.accent,
+    marginHorizontal: spacing.md,
+    marginBottom: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: 8,
+    fontWeight: '600',
+    overflow: 'hidden',
   },
   list: {
     paddingHorizontal: spacing.md,

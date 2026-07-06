@@ -30,6 +30,13 @@ export interface ImportResult {
   failed: number;
 }
 
+export interface VaultActivityEvent {
+  type: 'import' | 'export';
+  success?: boolean;
+  imported?: number;
+  failed?: number;
+}
+
 interface NativeVaultModule {
   getState(): Promise<VaultState>;
   lock(): void;
@@ -37,7 +44,7 @@ interface NativeVaultModule {
   listItems(): Promise<VaultItemMeta[]>;
   deleteItem(itemId: string): Promise<boolean>;
   importMedia(deleteOriginals: boolean): Promise<ImportResult>;
-  exportItem(itemId: string): Promise<boolean>;
+  exportItem(itemId: string, name: string, mime: string): Promise<boolean>;
   addListener(eventName: string): void;
   removeListeners(count: number): void;
 }
@@ -68,5 +75,18 @@ export function onLockStateChanged(
 /** Fires when vault contents changed (e.g. an import finished). */
 export function onVaultChanged(listener: () => void): () => void {
   const sub = emitter.addListener('vaultChanged', listener);
+  return () => sub.remove();
+}
+
+/**
+ * Fires when a queued import/export finishes. These complete AFTER a
+ * re-unlock (the file picker backgrounds the app, which instant-locks),
+ * so the screen that started them is long unmounted — whatever is
+ * mounted now uses this to show the outcome.
+ */
+export function onVaultActivity(
+  listener: (event: VaultActivityEvent) => void,
+): () => void {
+  const sub = emitter.addListener('vaultActivity', listener);
   return () => sub.remove();
 }
