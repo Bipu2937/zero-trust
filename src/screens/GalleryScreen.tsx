@@ -17,7 +17,7 @@ import {colors, spacing} from '../theme';
 
 interface Props {
   state: VaultState;
-  onOpen: (item: VaultItemMeta) => void;
+  onOpen: (items: VaultItemMeta[], index: number) => void;
 }
 
 function formatSize(bytes: number): string {
@@ -107,8 +107,8 @@ export function GalleryScreen({state, onOpen}: Props): React.JSX.Element {
             enter.
           </Text>
         }
-        renderItem={({item}) => (
-          <Pressable style={styles.tile} onPress={() => onOpen(item)}>
+        renderItem={({item, index}) => (
+          <Pressable style={styles.tile} onPress={() => onOpen(items, index)}>
             <Text style={styles.tileGlyph}>
               {item.kind === 'video' ? '▶' : '◻'}
             </Text>

@@ -71,6 +71,37 @@ class SecureMediaView(private val reactContext: ThemedReactContext) :
             runCatching { if (value) p.pause() else p.start() }
         }
 
+    /** Seek command from JS (milliseconds). Position only — no bytes. */
+    fun seekTo(positionMs: Int) {
+        player?.let { p -> runCatching { p.seekTo(positionMs) } }
+    }
+
+    /* ---------------------- playback progress loop ---------------------- */
+
+    private var progressLoopRunning = false
+
+    private val progressRunnable = object : Runnable {
+        override fun run() {
+            val p = player
+            if (p == null) {
+                progressLoopRunning = false
+                return
+            }
+            runCatching {
+                if (p.isPlaying) {
+                    emit("progress", durationMs = p.duration, positionMs = p.currentPosition)
+                }
+            }
+            postDelayed(this, 250)
+        }
+    }
+
+    private fun startProgressLoop() {
+        if (progressLoopRunning) return
+        progressLoopRunning = true
+        post(progressRunnable)
+    }
+
     init {
         setBackgroundColor(Color.BLACK)
         // THE core protection: mark the surface as secure/protected.
@@ -223,6 +254,7 @@ class SecureMediaView(private val reactContext: ThemedReactContext) :
             p.setSurface(surfaceView.holder.surface)
             emit("loaded", durationMs = p.duration)
             if (!paused) p.start()
+            startProgressLoop()
         }
         mediaPlayer.setOnCompletionListener { emit("ended") }
         mediaPlayer.setOnErrorListener { _, what, extra ->
@@ -257,11 +289,17 @@ class SecureMediaView(private val reactContext: ThemedReactContext) :
 
     /* ------------------------------ events ------------------------------ */
 
-    private fun emit(type: String, message: String? = null, durationMs: Int? = null) {
+    private fun emit(
+        type: String,
+        message: String? = null,
+        durationMs: Int? = null,
+        positionMs: Int? = null,
+    ) {
         val map = Arguments.createMap().apply {
             putString("type", type)
             if (message != null) putString("message", message)
             if (durationMs != null) putInt("durationMs", durationMs)
+            if (positionMs != null) putInt("positionMs", positionMs)
         }
         reactContext.getJSModule(RCTEventEmitter::class.java)
             .receiveEvent(id, EVENT_NAME, map)

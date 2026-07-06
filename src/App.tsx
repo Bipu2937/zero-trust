@@ -20,7 +20,10 @@ import {colors} from './theme';
 function App(): React.JSX.Element {
   const {unlocked} = useInstantLock();
   const [state, setState] = useState<VaultState | null>(null);
-  const [viewing, setViewing] = useState<VaultItemMeta | null>(null);
+  const [viewing, setViewing] = useState<{
+    items: VaultItemMeta[];
+    index: number;
+  } | null>(null);
 
   // Refresh persisted state whenever the lock state flips.
   useEffect(() => {
@@ -41,9 +44,20 @@ function App(): React.JSX.Element {
       />
     );
   } else if (viewing) {
-    screen = <ViewerScreen item={viewing} onClose={() => setViewing(null)} />;
+    screen = (
+      <ViewerScreen
+        items={viewing.items}
+        initialIndex={viewing.index}
+        onClose={() => setViewing(null)}
+      />
+    );
   } else {
-    screen = <GalleryScreen state={state} onOpen={setViewing} />;
+    screen = (
+      <GalleryScreen
+        state={state}
+        onOpen={(items, index) => setViewing({items, index})}
+      />
+    );
   }
 
   return (

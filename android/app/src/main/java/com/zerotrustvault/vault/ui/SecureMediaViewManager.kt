@@ -1,5 +1,6 @@
 package com.zerotrustvault.vault.ui
 
+import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.common.MapBuilder
 import com.facebook.react.uimanager.SimpleViewManager
 import com.facebook.react.uimanager.ThemedReactContext
@@ -20,6 +21,12 @@ class SecureMediaViewManager : SimpleViewManager<SecureMediaView>() {
     @ReactProp(name = "paused")
     fun setPaused(view: SecureMediaView, paused: Boolean) {
         view.paused = paused
+    }
+
+    override fun receiveCommand(view: SecureMediaView, commandId: String, args: ReadableArray?) {
+        when (commandId) {
+            "seek" -> view.seekTo(args?.getInt(0) ?: 0)
+        }
     }
 
     override fun getExportedCustomDirectEventTypeConstants(): Map<String, Any> =

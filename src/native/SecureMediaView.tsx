@@ -3,14 +3,27 @@
  * Kotlin side decrypts and renders straight onto a secure (DRM-style)
  * SurfaceView. Screen captures of this view come back black, and the
  * decrypted bytes never exist in the JS runtime.
+ *
+ * The bridge stays command-and-metadata only: `seek(ms)` sends a
+ * position, `progress` events return positions — never bytes.
  */
-import React from 'react';
-import {requireNativeComponent, ViewStyle} from 'react-native';
+import React, {
+  forwardRef,
+  useImperativeHandle,
+  useRef,
+} from 'react';
+import {
+  findNodeHandle,
+  requireNativeComponent,
+  UIManager,
+  ViewStyle,
+} from 'react-native';
 
 export interface MediaEvent {
-  type: 'loaded' | 'ended' | 'error';
+  type: 'loaded' | 'ended' | 'error' | 'progress';
   message?: string;
   durationMs?: number;
+  positionMs?: number;
 }
 
 interface NativeSecureMediaProps {
@@ -23,6 +36,11 @@ interface NativeSecureMediaProps {
 const NativeSecureMedia =
   requireNativeComponent<NativeSecureMediaProps>('ZTVSecureMediaView');
 
+export interface SecureMediaViewHandle {
+  /** Seek video playback to a position in milliseconds. */
+  seek(positionMs: number): void;
+}
+
 interface Props {
   itemId: string | null;
   paused?: boolean;
@@ -30,18 +48,34 @@ interface Props {
   style?: ViewStyle;
 }
 
-export function SecureMediaView({
-  itemId,
-  paused = false,
-  onEvent,
-  style,
-}: Props): React.JSX.Element {
-  return (
-    <NativeSecureMedia
-      itemId={itemId}
-      paused={paused}
-      style={style}
-      onMediaEvent={e => onEvent?.(e.nativeEvent)}
-    />
-  );
-}
+export const SecureMediaView = forwardRef<SecureMediaViewHandle, Props>(
+  function SecureMediaView(
+    {itemId, paused = false, onEvent, style},
+    ref,
+  ): React.JSX.Element {
+    const nativeRef = useRef<React.Component<NativeSecureMediaProps> | null>(
+      null,
+    );
+
+    useImperativeHandle(ref, () => ({
+      seek(positionMs: number) {
+        const node = findNodeHandle(nativeRef.current);
+        if (node != null) {
+          UIManager.dispatchViewManagerCommand(node, 'seek', [
+            Math.max(0, Math.round(positionMs)),
+          ]);
+        }
+      },
+    }));
+
+    return (
+      <NativeSecureMedia
+        ref={nativeRef as never}
+        itemId={itemId}
+        paused={paused}
+        style={style}
+        onMediaEvent={e => onEvent?.(e.nativeEvent)}
+      />
+    );
+  },
+);
