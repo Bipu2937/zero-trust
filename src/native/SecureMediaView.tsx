@@ -29,6 +29,7 @@ export interface MediaEvent {
 interface NativeSecureMediaProps {
   itemId: string | null;
   paused: boolean;
+  thumbnail?: boolean;
   onMediaEvent?: (event: {nativeEvent: MediaEvent}) => void;
   style?: ViewStyle;
 }
@@ -44,13 +45,18 @@ export interface SecureMediaViewHandle {
 interface Props {
   itemId: string | null;
   paused?: boolean;
+  /**
+   * Render a single still poster (gallery-tile mode) instead of a live,
+   * playable surface. Videos decode one frame; images look the same.
+   */
+  thumbnail?: boolean;
   onEvent?: (event: MediaEvent) => void;
   style?: ViewStyle;
 }
 
 export const SecureMediaView = forwardRef<SecureMediaViewHandle, Props>(
   function SecureMediaView(
-    {itemId, paused = false, onEvent, style},
+    {itemId, paused = false, thumbnail = false, onEvent, style},
     ref,
   ): React.JSX.Element {
     const nativeRef = useRef<React.Component<NativeSecureMediaProps> | null>(
@@ -73,6 +79,7 @@ export const SecureMediaView = forwardRef<SecureMediaViewHandle, Props>(
         ref={nativeRef as never}
         itemId={itemId}
         paused={paused}
+        thumbnail={thumbnail}
         style={style}
         onMediaEvent={e => onEvent?.(e.nativeEvent)}
       />

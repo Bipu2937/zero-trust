@@ -1,6 +1,7 @@
 import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {FlatList, Pressable, StyleSheet, Text, View} from 'react-native';
 import {ConfirmSheet} from '../components/ConfirmSheet';
+import {SecureMediaView} from '../native/SecureMediaView';
 import {
   onVaultActivity,
   onVaultChanged,
@@ -26,10 +27,13 @@ function formatSize(bytes: number): string {
 }
 
 /**
- * Vault contents. Deliberately renders metadata only — names, sizes,
- * type glyphs. Pixel data appears exclusively inside the secure viewer
- * surface; there are no JS-side thumbnails because thumbnails would mean
- * plaintext bytes in the JS heap.
+ * Vault contents, shown as a thumbnail grid. Crucially, the previews are
+ * NOT JS-side bitmaps — that would mean plaintext bytes in the JS heap.
+ * Each tile mounts a small SecureMediaView in `thumbnail` mode: the native
+ * side decrypts and draws a down-sampled still (a poster frame for videos)
+ * straight onto a secure surface. So the grid is screenshot-black and no
+ * decrypted byte ever crosses the bridge, yet you can see what you're
+ * about to open.
  *
  * Also the landing screen after every unlock, so it owns the banner that
  * reports queued import/export outcomes (those finish after re-unlock,
@@ -126,9 +130,18 @@ export function GalleryScreen({state, onOpen}: Props): React.JSX.Element {
         }
         renderItem={({item, index}) => (
           <Pressable style={styles.tile} onPress={() => onOpen(items, index)}>
-            <Text style={styles.tileGlyph}>
-              {item.kind === 'video' ? '▶' : '◻'}
-            </Text>
+            <View style={styles.thumbFrame}>
+              <SecureMediaView
+                itemId={item.id}
+                thumbnail
+                style={styles.thumb}
+              />
+              {item.kind === 'video' && (
+                <View style={styles.playBadge} pointerEvents="none">
+                  <Text style={styles.playBadgeText}>▶</Text>
+                </View>
+              )}
+            </View>
             <Text style={styles.tileName} numberOfLines={1}>
               {item.name}
             </Text>
@@ -229,26 +242,44 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
     borderColor: colors.border,
-    padding: spacing.md,
-    minHeight: 110,
-    justifyContent: 'flex-end',
+    overflow: 'hidden',
   },
-  tileGlyph: {
-    color: colors.accent,
-    fontSize: 26,
-    position: 'absolute',
-    top: spacing.md,
-    left: spacing.md,
+  thumbFrame: {
+    width: '100%',
+    aspectRatio: 1,
+    backgroundColor: '#000',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  thumb: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  playBadge: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: 'rgba(11, 15, 20, 0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  playBadgeText: {
+    color: colors.text,
+    fontSize: 14,
+    marginLeft: 2,
   },
   tileName: {
     color: colors.text,
     fontSize: 14,
     fontWeight: '600',
+    paddingHorizontal: spacing.md,
+    marginTop: spacing.sm,
   },
   tileMeta: {
     color: colors.textDim,
     fontSize: 11,
     marginTop: 2,
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.md,
   },
   empty: {
     color: colors.textDim,
