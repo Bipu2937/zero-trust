@@ -1,9 +1,11 @@
 package com.zerotrustvault.vault.ui
 
 import android.annotation.SuppressLint
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.Rect
+import android.media.MediaMetadataRetriever
 import android.media.MediaPlayer
 import android.view.SurfaceHolder
 import android.view.SurfaceView
@@ -35,6 +37,13 @@ import java.util.concurrent.Executors
  *   * video:  MediaPlayer pulls from [EncryptedMediaDataSource], which
  *     decrypts 64KiB chunks on demand straight onto the secure surface.
  *     Nothing is ever staged on disk; there is no disk cache to disable.
+ *
+ * In [thumbnail] mode the same surface is reused as a gallery tile: images
+ * draw the same down-sampled still, and videos decode a SINGLE poster
+ * frame (via [EncryptedMediaDataSource] + MediaMetadataRetriever) instead
+ * of starting playback. Because the tile is a secure surface too, a grid
+ * of thumbnails is still screenshot-black and still keeps every decrypted
+ * byte out of the JS runtime — the vault's whole point.
  */
 @SuppressLint("ViewConstructor")
 class SecureMediaView(private val reactContext: ThemedReactContext) :
@@ -69,6 +78,17 @@ class SecureMediaView(private val reactContext: ThemedReactContext) :
             field = value
             val p = player ?: return
             runCatching { if (value) p.pause() else p.start() }
+        }
+
+    /**
+     * Thumbnail (gallery-tile) mode: draw a still poster instead of playing.
+     * Videos decode one frame; images behave exactly as in full view.
+     */
+    var thumbnail: Boolean = false
+        set(value) {
+            if (field == value) return
+            field = value
+            restart()
         }
 
     /** Seek command from JS (milliseconds). Position only — no bytes. */
@@ -187,9 +207,10 @@ class SecureMediaView(private val reactContext: ThemedReactContext) :
             val item = VaultStore.findItem(context, key, id)
                 ?: throw SecurityException("Unknown item")
             if (gen != generation) return
-            when (item.kind) {
-                "video" -> startVideo(gen, id)
-                else -> drawImage(gen, id)
+            when {
+                item.kind != "video" -> drawImage(gen, id)
+                thumbnail -> drawVideoPoster(gen, id)
+                else -> startVideo(gen, id)
             }
         } catch (t: Throwable) {
             emit("error", message = t.message ?: "load failed")
@@ -221,24 +242,61 @@ class SecureMediaView(private val reactContext: ThemedReactContext) :
             val bitmap = BitmapFactory.decodeByteArray(plain, 0, plain.size, opts)
                 ?: throw SecurityException("Undecodable image")
 
-            setContentSize(bitmap.width, bitmap.height)
-
             try {
-                val holder = surfaceView.holder
-                val canvas = holder.lockCanvas() ?: return
-                try {
-                    canvas.drawColor(Color.BLACK)
-                    val dest = Rect(0, 0, canvas.width, canvas.height)
-                    canvas.drawBitmap(bitmap, null, dest, null)
-                } finally {
-                    holder.unlockCanvasAndPost(canvas)
-                }
+                drawBitmapToSurface(bitmap)
             } finally {
                 bitmap.recycle()
             }
             emit("loaded")
         } finally {
             MemoryUtil.wipe(plain)
+        }
+    }
+
+    /**
+     * Decode ONE frame from an encrypted video and draw it as a still — the
+     * gallery-tile poster. Uses the same on-the-fly decrypting data source
+     * as playback, so no plaintext ever hits disk; the retriever and its
+     * source are released the moment the frame is drawn.
+     */
+    private fun drawVideoPoster(gen: Int, id: String) {
+        val context = reactContext.applicationContext
+        val file = VaultStore.mediaFile(context, id)
+        val source = EncryptedMediaDataSourceHolder(file)
+        val retriever = MediaMetadataRetriever()
+        try {
+            retriever.setDataSource(source.source)
+            val durationMs = retriever
+                .extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                ?.toIntOrNull() ?: 0
+            // First sync frame; fall back to whatever frame is available.
+            val frame = retriever.getFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                ?: retriever.frameAtTime
+                ?: throw SecurityException("No decodable frame")
+            try {
+                if (gen != generation || !surfaceReady) return
+                drawBitmapToSurface(frame)
+            } finally {
+                frame.recycle()
+            }
+            emit("loaded", durationMs = durationMs)
+        } finally {
+            runCatching { retriever.release() }
+            source.close()
+        }
+    }
+
+    /** Draws a bitmap centered/letterboxed onto the secure surface. */
+    private fun drawBitmapToSurface(bitmap: Bitmap) {
+        setContentSize(bitmap.width, bitmap.height)
+        val holder = surfaceView.holder
+        val canvas = holder.lockCanvas() ?: return
+        try {
+            canvas.drawColor(Color.BLACK)
+            val dest = Rect(0, 0, canvas.width, canvas.height)
+            canvas.drawBitmap(bitmap, null, dest, null)
+        } finally {
+            holder.unlockCanvasAndPost(canvas)
         }
     }
 

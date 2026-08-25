@@ -23,6 +23,11 @@ class SecureMediaViewManager : SimpleViewManager<SecureMediaView>() {
         view.paused = paused
     }
 
+    @ReactProp(name = "thumbnail")
+    fun setThumbnail(view: SecureMediaView, thumbnail: Boolean) {
+        view.thumbnail = thumbnail
+    }
+
     override fun receiveCommand(view: SecureMediaView, commandId: String, args: ReadableArray?) {
         when (commandId) {
             "seek" -> view.seekTo(args?.getInt(0) ?: 0)
