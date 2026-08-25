@@ -7,6 +7,9 @@ import android.graphics.Color
 import android.graphics.Rect
 import android.media.MediaMetadataRetriever
 import android.media.MediaPlayer
+import android.view.GestureDetector
+import android.view.MotionEvent
+import android.view.ScaleGestureDetector
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.widget.FrameLayout
@@ -44,6 +47,13 @@ import java.util.concurrent.Executors
  * of starting playback. Because the tile is a secure surface too, a grid
  * of thumbnails is still screenshot-black and still keeps every decrypted
  * byte out of the JS runtime — the vault's whole point.
+ *
+ * Pinch-to-zoom, drag-to-pan and double-tap-to-zoom (full view only) are
+ * handled here too: the gestures transform the secure SurfaceView itself
+ * (scale + translation), so both photos and video zoom identically and the
+ * pixels never leave the protected surface. While zoomed or pinching we ask
+ * the parent not to intercept touches, so panning doesn't fight the pager;
+ * at 1× a horizontal swipe still pages between items as before.
  */
 @SuppressLint("ViewConstructor")
 class SecureMediaView(private val reactContext: ThemedReactContext) :
@@ -52,6 +62,9 @@ class SecureMediaView(private val reactContext: ThemedReactContext) :
     companion object {
         const val EVENT_NAME = "onMediaEvent"
         private const val MAX_IMAGE_BYTES = 128L * 1024 * 1024
+        private const val MIN_SCALE = 1f
+        private const val MAX_SCALE = 5f
+        private const val DOUBLE_TAP_SCALE = 2.5f
     }
 
     private val surfaceView = SurfaceView(reactContext)
@@ -94,6 +107,100 @@ class SecureMediaView(private val reactContext: ThemedReactContext) :
     /** Seek command from JS (milliseconds). Position only — no bytes. */
     fun seekTo(positionMs: Int) {
         player?.let { p -> runCatching { p.seekTo(positionMs) } }
+    }
+
+    /* ------------------------------- zoom ------------------------------- */
+
+    private var scaleFactor = MIN_SCALE
+    private var transX = 0f
+    private var transY = 0f
+
+    private val scaleDetector = ScaleGestureDetector(
+        reactContext,
+        object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+            override fun onScale(detector: ScaleGestureDetector): Boolean {
+                val prev = scaleFactor
+                scaleFactor = (scaleFactor * detector.scaleFactor)
+                    .coerceIn(MIN_SCALE, MAX_SCALE)
+                val ratio = scaleFactor / prev
+                // Keep the pinch focal point anchored under the fingers.
+                val fx = detector.focusX - width / 2f
+                val fy = detector.focusY - height / 2f
+                transX = fx - (fx - transX) * ratio
+                transY = fy - (fy - transY) * ratio
+                applyTransform()
+                return true
+            }
+        },
+    )
+
+    private val gestureDetector = GestureDetector(
+        reactContext,
+        object : GestureDetector.SimpleOnGestureListener() {
+            override fun onScroll(
+                e1: MotionEvent?,
+                e2: MotionEvent,
+                distanceX: Float,
+                distanceY: Float,
+            ): Boolean {
+                if (scaleFactor <= MIN_SCALE) return false
+                transX -= distanceX
+                transY -= distanceY
+                applyTransform()
+                return true
+            }
+
+            override fun onDoubleTap(e: MotionEvent): Boolean {
+                if (scaleFactor > MIN_SCALE) {
+                    resetZoom()
+                } else {
+                    scaleFactor = DOUBLE_TAP_SCALE
+                    val fx = e.x - width / 2f
+                    val fy = e.y - height / 2f
+                    transX = -fx * (DOUBLE_TAP_SCALE - 1f)
+                    transY = -fy * (DOUBLE_TAP_SCALE - 1f)
+                    applyTransform()
+                }
+                return true
+            }
+        },
+    )
+
+    private fun applyTransform() {
+        clampTranslation()
+        surfaceView.scaleX = scaleFactor
+        surfaceView.scaleY = scaleFactor
+        surfaceView.translationX = transX
+        surfaceView.translationY = transY
+    }
+
+    /** Never let the scaled content be dragged off past its own edges. */
+    private fun clampTranslation() {
+        val extraX = ((surfaceView.width * scaleFactor - width) / 2f).coerceAtLeast(0f)
+        val extraY = ((surfaceView.height * scaleFactor - height) / 2f).coerceAtLeast(0f)
+        transX = transX.coerceIn(-extraX, extraX)
+        transY = transY.coerceIn(-extraY, extraY)
+    }
+
+    private fun resetZoom() {
+        scaleFactor = MIN_SCALE
+        transX = 0f
+        transY = 0f
+        surfaceView.scaleX = 1f
+        surfaceView.scaleY = 1f
+        surfaceView.translationX = 0f
+        surfaceView.translationY = 0f
+    }
+
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (thumbnail) return false
+        scaleDetector.onTouchEvent(event)
+        gestureDetector.onTouchEvent(event)
+        // Hold the pager off while zoomed or actively pinching, so pans and
+        // pinches aren't stolen; at 1× let it through so swiping still pages.
+        val interactive = scaleFactor > MIN_SCALE || event.pointerCount > 1
+        parent?.requestDisallowInterceptTouchEvent(interactive)
+        return true
     }
 
     /* ---------------------- playback progress loop ---------------------- */
@@ -194,6 +301,8 @@ class SecureMediaView(private val reactContext: ThemedReactContext) :
 
     private fun restart() {
         teardownPlayback()
+        // A different item (or mode) starts at 1× with no pan.
+        resetZoom()
         val id = itemId ?: return
         if (!surfaceReady) return
         val gen = ++generation
